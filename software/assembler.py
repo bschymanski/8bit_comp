@@ -12,7 +12,7 @@ from typing import *
 class OperandKind(Enum):
     Imm = auto()
     Reg = auto()
-
+    RegPair = auto()
 
 # An instruction operand, like a register oder an immediate value.
 @dataclass
@@ -29,7 +29,13 @@ class Opcode(Enum):
     # Actual instructions
     LDI = auto()
     MV = auto()
+    JABSR =auto()
     JRELI = auto()
+    JRELR = auto()
+    NOP = auto()
+
+    # Pseudo-instructions
+    HALT = auto()
 
     # Assembler directives
     D_ORG = auto()
@@ -45,7 +51,11 @@ class Instruction:
         for op in self.operands:
             s += " " + repr(op)
         return s
+    
+# A parser that converts human-readable assembly text into a list of 'instruction' objects
+@dataclass
 class AssemblyParser:
+    program: List[Instruction] = field(default_factory=list)
     # Abort with an error message.
     def error(self, message):
         consumed = len(self.current_contents) - len(self.current_input)
@@ -77,10 +87,14 @@ class AssemblyParser:
         while len(self.current_input) > 0:
             inst = self.parse_instruction()
             print(inst)
+            self.program.append(inst)
         
     # Parse instruction
     def parse_instruction(self) -> Instruction:
         # Actual instructions
+        if self.consume_identifier("nop"):
+            return Instruction(Opcode.NOP)
+        
         if self.consume_identifier("ldi"):
             rd = self.parse_register()
             self.parse_regex(r',')
@@ -92,11 +106,23 @@ class AssemblyParser:
             self.parse_regex(r',')
             rs = self.parse_register()
             return Instruction(Opcode.MV, [rd, rs])
+        
+        if self.consume_identifier("jabsr"):
+            rs16 = self.parse_register_pair()
+            return Instruction(Opcode.JABSR, [rs16])
 
         if self.consume_identifier("jreli"):
             imm = self.parse_immediate()
             return Instruction(Opcode.JRELI, [imm])
         
+        if self.consume_identifier("jrelr"):
+            rs = self.parse_register()
+            return Instruction(Opcode.JRELI, [rs])
+
+        # Pseudo-instructions
+        if self.consume_identifier("halt"):
+            return Instruction(Opcode.HALT)
+
         # Directions
         if self.consume_identifier(r'\.org'):
             imm = self.parse_immediate()
@@ -109,6 +135,14 @@ class AssemblyParser:
         idx = int(self.parse_regex(r'r([0-6])\b', "expected a register")[1])
         return Operand(OperandKind.Reg, idx)
 
+    # Parse a register pair, like r0r1
+    def parse_register_pair(self) -> Operand:
+        m =self.parse_regex(r'r([0-6])r([0-6])\b', "expected a 16bit register pair")
+        lo = int(m[1])
+        hi = int(m[2])
+        if hi != lo + 1:
+            self.error(f"Registers in 16bit must be conescutive {m[0]}")
+        return Operand(OperandKind.RegPair, lo)
     # Parse an immediate, like 42 or 0xbeef or 0b10101111
     def parse_immediate(self) -> Operand:
         negative = False
@@ -179,3 +213,6 @@ args = parser.parse_args()
 parser = AssemblyParser()
 for i in args.inputs:
     parser.parse_file(i)
+
+print ("List of instructions that we parsed:\n")
+print(parser.program)

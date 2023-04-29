@@ -28,12 +28,13 @@
     ldi r4, 0x08
     ldi r5, 0x04
     ldi r6, 0x02
-    jrel r0 # 0xF040
+    jrelr r0 # 0xF040
     nop
 
     # Test 16 bit jump
     ldi r0, 0x40
     ldi r1, 0xF0
     jabsr r0r1 # 0xf040
+    halt # never reached
 
 .org 0xf040
