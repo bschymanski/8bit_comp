@@ -30,6 +30,7 @@
     ldi r6, 0x02
     jrelr r0 # 0xF040
     nop
+    jreli -32
 
     # Test 16 bit jump
     ldi r0, 0x40
@@ -37,4 +38,4 @@
     jabsr r0r1 # 0xf040
     halt # never reached
 
-.org 0xf040
+.org 0xF040

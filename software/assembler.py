@@ -40,18 +40,37 @@ class Opcode(Enum):
     # Assembler directives
     D_ORG = auto()
     
+
+
 # An assembly instruction, represented by its opcode and list of operands
 @dataclass
 class Instruction:
     opcode: Opcode
     operands: List[Operand] = field(default_factory=list)
+    address: Optional[int] = None
 
     def __repr__(self) -> str:
         s = self.opcode.name
         for op in self.operands:
             s += " " + repr(op)
         return s
-    
+
+# Report an error and exit with an error code
+def error(message, *args):
+    sys.stderr.write(
+        colored("error:", "red", attrs=["bold"]) + " " +
+        colored(message, attrs=["bold"]) + "\n")
+    for arg in args:
+        if arg is None:
+            continue
+        elif isinstance(arg, Instruction):
+            pretty = AssemblyPrinter([arg]).print()
+            sys.stderr.write(pretty)
+        else:
+            sys.stderr.write(arg + "\n")
+    sys.exit(1)
+
+
 # A parser that converts human-readable assembly text into a list of 'instruction' objects
 @dataclass
 class AssemblyParser:
@@ -63,13 +82,21 @@ class AssemblyParser:
         line_num = len(consumed_lines)
         col_num = len(consumed_lines[-1])
         remaining_line = self.current_input.split("\n")[0]
-        sys.stderr.write(
-            colored("error:", "red", attrs=["bold"]) + " " +
-            colored(message, attrs=["bold"]) + "\n")
-        sys.stderr.write(f"{self.current_file}:{line_num}:{col_num +1}\n\n")
-        sys.stderr.write(f"  {consumed_lines[-1]}{remaining_line}\n")
-        sys.stderr.write(f"  {' '*col_num}^\n")
-        sys.exit(1)
+        
+        error(
+            message,
+            f"{self.current_file}:{line_num}:{col_num +1}",
+            "",
+            f"  {consumed_lines[-1]}{remaining_line}",
+            f"  {' '*col_num}^"
+        )
+        #sys.stderr.write(
+        #    colored("error:", "red", attrs=["bold"]) + " " +
+        #    colored(message, attrs=["bold"]) + "\n")
+        #sys.stderr.write(f"{self.current_file}:{line_num}:{col_num +1}\n\n")
+        #sys.stderr.write(f"  {consumed_lines[-1]}{remaining_line}\n")
+        #sys.stderr.write(f"  {' '*col_num}^\n")
+        #sys.exit(1)
 
     # Parse an entire assembly file.
     def parse_file(self, file: str):
@@ -117,7 +144,7 @@ class AssemblyParser:
         
         if self.consume_identifier("jrelr"):
             rs = self.parse_register()
-            return Instruction(Opcode.JRELI, [rs])
+            return Instruction(Opcode.JRELR, [rs])
 
         # Pseudo-instructions
         if self.consume_identifier("halt"):
@@ -202,7 +229,123 @@ class AssemblyParser:
         if self.consume_regex(rf'{identifier}\b'):
             return True
         return False
+# A printer that converts a list of "Instruction" objects into human-readable
+# assembly text.
+@dataclass
+class AssemblyPrinter:
+    program: List[Instruction]
+
+    def print(self) -> str:
+        self.emit_address = any(i.address is not None for i in self.program)
+        self.output = ""
+        for i in self.program:
+            self.print_instruction(i)
+            self.emit("\n")
+        s = self.output
+        self.output = None
+        return s
     
+    def print_instruction(self, inst: Instruction):
+        # Print the address prefix
+        if self.emit_address:
+            address = "????"
+            if inst.address is not None:
+                address = f"{inst.address:04X}"
+            self.emit(f"{address}:   ")
+        # Actual instructions   
+        if inst.opcode == Opcode.NOP:
+            self.print_opcode("nop")
+            return
+        
+        if inst.opcode == Opcode.LDI:
+            self.print_opcode("ldi ")
+            self.print_operand(inst.operands[0])
+            self.emit(", ")
+            self.print_operand(inst.operands[1])
+            return
+
+        if inst.opcode == Opcode.MV:
+            self.print_opcode("mv ")
+            self.print_operand(inst.operands[0])
+            self.emit(", ")
+            self.print_operand(inst.operands[1])
+            return
+
+        if inst.opcode == Opcode.JABSR:
+            self.print_opcode("jabsr ")
+            self.print_operand(inst.operands[0])
+            return
+
+        if inst.opcode == Opcode.JRELI:
+            self.print_opcode("jreli ")
+            self.print_operand(inst.operands[0], hint_relative=True)
+            return
+              
+        if inst.opcode == Opcode.JRELR:
+            self.print_opcode("jrelr ")
+            self.print_operand(inst.operands[0])
+            return
+        
+        # pseudo-instructions
+        if inst.opcode == Opcode.HALT:
+            self.print_opcode("halt ")
+            return
+        
+        # directives
+        if inst.opcode == Opcode.D_ORG:
+            self.emit(".org ")
+            self.print_operand(inst.operands[0], hint_addr=True)
+            return
+
+        self.emit(f"<{inst}")
+        
+
+    def print_opcode(self, text: str):
+        self.emit(f"    {text:<7s}") # der Opcode wird mit mit whitspaces aufgefüllt, left alingned, also Opcode + " " bis es 7 chars sind
+    
+    def print_operand(self, operand: Operand, 
+                      hint_relative: bool = False,
+                      hint_addr=False
+                      ):
+        if operand.kind == OperandKind.Imm:
+            if hint_addr:
+                self.emit(f"0x{operand.value:04X}")
+            elif operand.value >= 0 and hint_relative:
+                self.emit(f"+{operand.value}")
+            else:
+                self.emit(f"{operand.value}")
+        elif operand.kind == OperandKind.Reg:
+            self.emit(f"r{operand.value}")
+        elif operand.kind == OperandKind.RegPair:
+            self.emit(f"r{operand.value}r{operand.value + 1}")
+
+
+    def emit(self, text: str):
+        self.output += text
+
+
+# Utility to compute the exact address of instructions in the binary
+@dataclass
+class Layouter:
+    current_address: int = 0
+
+    def layout_program(self, program: List[Instruction]):
+        for inst in program:
+            self.layout_instruction(inst)
+
+    def layout_instruction(self, inst: Instruction):
+        if inst.opcode == Opcode.D_ORG:
+            org_address = inst.operands[0].value
+            if self.current_address > org_address:
+                error(f"org directive address 0x{org_address:04X} behind current address 0x{self.current_address:04X}", inst)    
+            self.current_address = org_address
+            inst.address = org_address
+            return
+        
+        inst.address = self.current_address
+        self.current_address += 1
+
+
 # parse commandline arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("inputs", metavar="INPUT", nargs="*",
@@ -214,5 +357,14 @@ parser = AssemblyParser()
 for i in args.inputs:
     parser.parse_file(i)
 
+
+# compute the addresses of each instruction
+Layouter().layout_program(parser.program)
+
 print ("List of instructions that we parsed:\n")
 print(parser.program)
+
+# Print the assembly
+print("Assembler parsed Output: \n")
+print(AssemblyPrinter(parser.program).print())
+
