@@ -3,6 +3,9 @@
     test   */
 
     # comment
+    ldi r0, 0x00
+    ldi r0, 0x00
+    nop
     ldi r0, 0x00 # load immediate value into r0
     mv r1, r0
     mv r2, r1

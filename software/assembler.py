@@ -48,6 +48,7 @@ class Instruction:
     opcode: Opcode
     operands: List[Operand] = field(default_factory=list)
     address: Optional[int] = None
+    encoding: Optional[int] = None
 
     def __repr__(self) -> str:
         s = self.opcode.name
@@ -90,13 +91,6 @@ class AssemblyParser:
             f"  {consumed_lines[-1]}{remaining_line}",
             f"  {' '*col_num}^"
         )
-        #sys.stderr.write(
-        #    colored("error:", "red", attrs=["bold"]) + " " +
-        #    colored(message, attrs=["bold"]) + "\n")
-        #sys.stderr.write(f"{self.current_file}:{line_num}:{col_num +1}\n\n")
-        #sys.stderr.write(f"  {consumed_lines[-1]}{remaining_line}\n")
-        #sys.stderr.write(f"  {' '*col_num}^\n")
-        #sys.exit(1)
 
     # Parse an entire assembly file.
     def parse_file(self, file: str):
@@ -229,6 +223,10 @@ class AssemblyParser:
         if self.consume_regex(rf'{identifier}\b'):
             return True
         return False
+
+
+
+
 # A printer that converts a list of "Instruction" objects into human-readable
 # assembly text.
 @dataclass
@@ -237,6 +235,7 @@ class AssemblyPrinter:
 
     def print(self) -> str:
         self.emit_address = any(i.address is not None for i in self.program)
+        self.emit_encoding = any(i.encoding is not None for i in self.program)
         self.output = ""
         for i in self.program:
             self.print_instruction(i)
@@ -252,6 +251,13 @@ class AssemblyPrinter:
             if inst.address is not None:
                 address = f"{inst.address:04X}"
             self.emit(f"{address}:   ")
+
+        # Print the instruction encoding
+        if self.emit_encoding:
+            encoding = "    "
+            if inst.encoding is not None:
+                encoding = f"{inst.encoding:04X}"
+            self.emit(f"{encoding}  ")
         # Actual instructions   
         if inst.opcode == Opcode.NOP:
             self.print_opcode("nop")
@@ -279,6 +285,9 @@ class AssemblyPrinter:
         if inst.opcode == Opcode.JRELI:
             self.print_opcode("jreli ")
             self.print_operand(inst.operands[0], hint_relative=True)
+            if inst.address is not None:
+                target_addr = inst.address + inst.operands[0].value
+                self.emit(f"  # {target_addr:04X}")
             return
               
         if inst.opcode == Opcode.JRELR:
@@ -345,6 +354,110 @@ class Layouter:
         inst.address = self.current_address
         self.current_address += 1
 
+# An encoder that computes the binary encoding for every instruction in a program
+class InstructionEncoder:
+    def error(self, message: str):
+        error(message, self.inst)
+
+    def encode_program(self, program: List[Instruction]):
+        for inst in program:
+            self.inst = inst
+            self.encoding = 0
+            self.encode_instruction(inst)
+            inst.encoding = self.encoding
+            #sys.stdout.write(AssemblyPrinter([inst]).print())
+
+    def encode_instruction(self, inst: Instruction):
+        # Actual instructions
+        if inst.opcode == Opcode.NOP:
+            self.encode_bits(0, 16, 0x0000)
+            return
+        
+        if inst.opcode == Opcode.LDI:
+            self.encode_bits(0, 4, 0x8)
+            self.encode_rd(inst.operands[0])
+            self.encode_imm8(inst.operands[1])
+            return
+        
+        if inst.opcode == Opcode.MV:
+            self.encode_bits(0, 4, 0x0)
+            self.encode_rd(inst.operands[0])
+            self.encode_rs(inst.operands[1])
+            return
+        
+        if inst.opcode == Opcode.JABSR:
+            self.encode_bits(0, 8, 0x02)
+            self.encode_rs16(inst.operands[0])
+            return
+        
+        if inst.opcode == Opcode.JRELI:
+            self.encode_bits(0, 8, 0x09)
+            self.encode_simm8(inst.operands[0])
+            return
+        
+        if inst.opcode == Opcode.JRELR:
+            self.encode_bits(0, 8, 0x01)
+            self.encode_rs(inst.operands[0])
+            return
+        
+        if inst.opcode == Opcode.HALT:
+            self.encode_bits(0, 16, 0x0009)
+            return
+        
+        if inst.opcode == Opcode.D_ORG:
+            self.encoding = None
+            return
+
+        self.error("unencodable instruction")
+        
+    # Store the "value" into the instruction bits from "offset" to "offset+length"
+    def encode_bits(self, offset: int, length: int, value: int):
+        assert(offset >= 0)
+        assert(length >= 0)
+        assert(offset + length <= 16)
+        assert(value >= 0)
+        assert(value < 2**length)
+        mask = ((1 << length) -1) << offset
+        self.encoding &= ~mask
+        self.encoding |= value << offset
+    
+    # Encode a register operand in the "rd" field 
+    def encode_rd(self, operand: Operand):
+        if operand.kind != OperandKind.Reg or operand.value < 0 or operand.value > 6:
+            self.error(f"expected rd register operand; got {operand}")
+        self.encode_bits(4, 4, operand.value + 1)
+
+    # Encode a register operand in the "rs" field 
+    def encode_rs(self, operand: Operand):
+        if operand.kind != OperandKind.Reg or operand.value < 0 or operand.value > 6:
+            self.error(f"expected rs register operand; got {operand}")
+        self.encode_bits(8, 4, operand.value + 1)
+
+    # Encode a 16 bit register operand in the "rs16" field 
+    def encode_rs16(self, operand: Operand):
+        if operand.kind != OperandKind.RegPair or operand.value < 0 or operand.value > 5:
+            self.error(f"expected rs16 register operand; got {operand}")
+        self.encode_bits(8, 4, operand.value + 1)
+
+    # encode an immediate operand in the 8 bit immediate field
+    def encode_imm8(self, operand: Operand):
+        self.check_imm(operand, -128, 256)
+        self.encode_bits(8, 8, operand.value & 0xFF)
+    
+    # encode a signed immediate operand in the 8 bit immediate field
+    def encode_simm8(self, operand: Operand):
+        self.check_imm(operand, -128, 128)
+        self.encode_bits(8, 8, operand.value & 0xFF)
+    
+    # Error if an operand is not an immediate, or the immediate is less, than "lower" or greater than of equal to "upper"
+    def check_imm(self, operand: Operand, lower: int, upper: int):
+        if operand.kind != OperandKind.Imm:
+            self.error(f"expected immediate operand; got {operand}")
+        value = operand.value
+        if value < lower or value >= upper:
+            self.error(f"immediate vlaue {value} is out of bounds, expected {lower} <= value < {upper}")
+        
+
 
 # parse commandline arguments
 parser = argparse.ArgumentParser()
@@ -360,6 +473,9 @@ for i in args.inputs:
 
 # compute the addresses of each instruction
 Layouter().layout_program(parser.program)
+
+# Compute the binary encoding of each instruction
+InstructionEncoder().encode_program(parser.program)
 
 print ("List of instructions that we parsed:\n")
 print(parser.program)
