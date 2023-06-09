@@ -107,7 +107,8 @@ class AssemblyParser:
         self.skip()
         while len(self.current_input) > 0:
             inst = self.parse_instruction()
-            print(inst)
+            if args.print_assembly:
+                print(inst)
             self.program.append(inst)
         
     # Parse instruction
@@ -457,12 +458,55 @@ class InstructionEncoder:
         if value < lower or value >= upper:
             self.error(f"immediate vlaue {value} is out of bounds, expected {lower} <= value < {upper}")
         
+# convert a list of instructions to their binary representation. The
+# instructions must have already been encoded with an "instructionEncoder"
+def convert_program_to_bytes(program: List[Instruction],
+                             output_size: Optional[int] = None) -> bytes:
+    buffer = bytes()
+    for inst in program:
+        if inst.encoding is None or inst.address is None:
+            continue
+        if inst.address > len(buffer):
+            buffer += bytes(inst.address - len(buffer))
+        buffer += bytes([inst.encoding & 0xFF, (inst.encoding >> 8) & 0xFF])
+    if output_size is not None:
+        if len(buffer) > output_size:
+            error(f"binary size {len(buffer)} exceeds configured output size {output_size}")
+        buffer += bytes(output_size - len(buffer))
+    return buffer
 
+# print a blob of bytes as a hex dump
+def print_binary_hexdump(binary: bytes, bytes_per_line: int = 8):
+    offset_width = len(f"{len(binary):x}")
+    zeros = False
+    for offset in range(0, len(binary), bytes_per_line):
+        chunk = binary[offset:offset + bytes_per_line]
+        if all(byte == 0 for byte in chunk):
+            if not zeros:
+                print(f"{'.'*offset_width}.  [zeros]")
+            zeros = True
+            continue
+        zeros = False
+        str_bytes = " ".join(f"{byte:02X}" for byte in chunk)
+        str_chars = "".join(
+            chr(byte) if byte in range(32, 128) else "."
+            for byte in chunk
+        )
+        print(f"{offset:0{offset_width}X}:  {str_bytes:{3*bytes_per_line-1}}  {str_chars}")
+    print(f"{len(binary):0{offset_width}X}:  [end of binary]") 
 
 # parse commandline arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("inputs", metavar="INPUT", nargs="*",
     help="input files to assemble")
+parser.add_argument("-o", "--output", type = str,
+    help="output file")
+parser.add_argument("-s", "--size", type = int,
+    help="size of the output binary")
+parser.add_argument("-v", "--print-assembly", action="store_true",
+    help="print final assembly")
+parser.add_argument("-x", "--print-binary", action="store_true",
+    help="print hexdump of final binary")
 args = parser.parse_args()
 
 # parse the input file
@@ -477,10 +521,22 @@ Layouter().layout_program(parser.program)
 # Compute the binary encoding of each instruction
 InstructionEncoder().encode_program(parser.program)
 
-print ("List of instructions that we parsed:\n")
-print(parser.program)
+#print ("List of instructions that we parsed:\n")
+#print(parser.program)
 
 # Print the assembly
-print("Assembler parsed Output: \n")
-print(AssemblyPrinter(parser.program).print())
+if args.print_assembly:
+    print("Assembler parsed Output: \n")
+    print(AssemblyPrinter(parser.program).print())
 
+# collect the encoded instructions into blob of bytes
+binary = convert_program_to_bytes(parser.program, args.size)
+
+#write the binary to an output file if requested
+if args.output:
+    with open(args.output, "wb") as f:
+        f.write(binary)
+
+# print a hexdump of the binary if no output file is provided
+if not args.output or args.print_binary:
+    print_binary_hexdump(binary)

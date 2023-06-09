@@ -15,7 +15,7 @@
     mv r6, r5
     jreli +18  # 0x0020
 
-.org 0x20
+.org 0x100
     # load some interessig pattern;Setup interrupt table
     ldi r0, 0xF0
     ldi r1, 0x55

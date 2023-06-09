@@ -102,6 +102,7 @@ program = array.array('h', [
     ldi_r4, 0x00,
     ldi_r5, 0x00,
     ldi_r6, 0x00,
+    #jabsi, 0x0F, # Jabsi does not work
     ldi_r0, 0x01, #4
     mv_r1, rs0,   #5
     mv_r2, rs1,   #6
@@ -109,43 +110,54 @@ program = array.array('h', [
     mv_r4, rs3,
     mv_r5, rs4,
     mv_r6, rs5,
-
     ldi_r0, 0x01, #7
     ldi_r1, 0x02,
     ldi_r2, 0x04,
     ldi_r3, 0x08,
-    ldi_r4, 0x0F,
-    ldi_r5, 0x10,
-    ldi_r6, 0x20,
-    mv_r1, rs0,   #8
-    nop, 0x06,    #9
-    nop, 0x07,    #10
-    ldi_r0, 0x02, #11
-    ldi_r1, 0x03, #11
-    ldi_r2, 0x04, #12
-    mv_r1, rs0,   #13
-    mv_r2, rs1,   #14
-    ldi_r1, 0x04, #15
-    mv_r1, rs0,   #16
-    nop, 0x06,    #17
-    nop, 0x07,    #18
-    ldi_r0, 0x00, #19
-    ldi_r1, 0x00, #20
-    jabsi, 0x00,
-    jreli, 0xec,  #21
-    jabsr, 0x00,
+    ldi_r4, 0x10,
+    ldi_r5, 0x20,
+    ldi_r6, 0x40,
+    jreli, 0xf2,  #21
+    #mv_r1, rs0,   #8
+    #nop, 0x06,    #9
+    #nop, 0x07,    #10
+    #ldi_r0, 0x02, #11
+    #ldi_r1, 0x03, #11
+    #ldi_r2, 0x04, #12
+    #mv_r1, rs0,   #13
+    #mv_r2, rs1,   #14
+    #ldi_r1, 0x04, #15
+    #mv_r1, rs0,   #16
+    #nop, 0x06,    #17
+    #nop, 0x07,    #18
+    ldi_r0, 0x01, #19
+    ldi_r1, 0x02, #20
+    ldi_r2, 0x03, #3
+    ldi_r3, 0x04,
+    ldi_r4, 0x05,
+    ldi_r5, 0x06, #19
+    ldi_r6, 0x07, #20
+    ldi_r5, 0x00, #19
+    ldi_r6, 0x00, #20
+    jabsr, rs5,
+    #jabsr, 0x00,
+    #jabsr, 0x00,
+    #jabsi, 0x00,
+    #jreli, 0xec,  #21
+    
     
 ])
 
 rom = bytearray(null * 32768)
 proglength = len(program)
+print("rom begin")
 for i in range (0, proglength):
     rom[i] = program[i]
     print(hex(rom[i]))
-    
-print("-20 :")
-print(bin(-20 & 0xFF))
-print(hex(-20 & 0xFF))
+print("rom end")
+print("-14 :")
+print(bin(-14 & 0xFF))
+print(hex(-14 & 0xFF))
 
 with open("left_rom.bin", "wb") as out_file:
     out_file.write(rom);
